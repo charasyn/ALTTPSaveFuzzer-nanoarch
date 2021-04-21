@@ -3,7 +3,28 @@ sources  := nanoarch.c
 CFLAGS   := -Wall -O2 -g
 LFLAGS   := -static-libgcc
 LIBS     := -ldl
-packages := gl glew glfw3 alsa
+
+# Straight up lifted from bsnes-libretro makefile
+ifeq ($(platform),)
+platform = unix
+ifeq ($(shell uname -s),)
+	platform = win
+else ifneq ($(findstring MINGW,$(shell uname -s)),)
+	platform = win
+else ifneq ($(findstring Darwin,$(shell uname -s)),)
+	platform = osx
+else ifneq ($(findstring win,$(shell uname -s)),)
+	platform = win
+endif
+endif
+
+packages := glew glfw3
+ifeq ($(platform),unix)
+	packages += alsa gl
+	CFLAGS += -DALSA=1
+else ifeq ($(platform),win)
+	LIBS += -lopengl32
+endif
 
 # do not edit from here onwards
 objects := $(addprefix build/,$(sources:.c=.o))

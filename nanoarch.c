@@ -1,8 +1,9 @@
-
+#include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdarg.h>
 #include <stdbool.h>
+#include <string.h>
 #include <errno.h>
 #include <dlfcn.h>
 
@@ -10,11 +11,15 @@
 
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
+#if ALSA
 #include <alsa/asoundlib.h>
+#endif
 
 static GLFWwindow *g_win = NULL;
+#if ALSA
 static snd_pcm_t *g_pcm = NULL;
-static float g_scale = 3;
+#endif
+static float g_scale = 2;
 
 static GLfloat g_vertex[] = {
 	-1.0f, -1.0f, // left-bottom
@@ -146,7 +151,7 @@ static void create_window(int width, int height) {
 	if (glewInit() != GLEW_OK)
 		die("Failed to initialize glew");
 
-	glfwSwapInterval(1);
+	glfwSwapInterval(0);
 
 	printf("GLSL Version: %s\n", glGetString(GL_SHADING_LANGUAGE_VERSION));
 
@@ -172,6 +177,34 @@ static void resize_to_aspect(double ratio, int sw, int sh, int *dw, int *dh) {
 }
 
 
+static bool video_set_pixel_format(unsigned format) {
+	if (g_video.tex_id)
+		die("Tried to change pixel format after initialization.");
+
+	switch (format) {
+	case RETRO_PIXEL_FORMAT_0RGB1555:
+		g_video.pixfmt = GL_UNSIGNED_SHORT_5_5_5_1;
+		g_video.pixtype = GL_BGRA;
+		g_video.bpp = sizeof(uint16_t);
+		break;
+	case RETRO_PIXEL_FORMAT_XRGB8888:
+		g_video.pixfmt = GL_UNSIGNED_INT_8_8_8_8_REV;
+		g_video.pixtype = GL_BGRA;
+		g_video.bpp = sizeof(uint32_t);
+		break;
+	case RETRO_PIXEL_FORMAT_RGB565:
+		g_video.pixfmt  = GL_UNSIGNED_SHORT_5_6_5;
+		g_video.pixtype = GL_RGB;
+		g_video.bpp = sizeof(uint16_t);
+		break;
+	default:
+		die("Unknown pixel type %u", format);
+	}
+
+	return true;
+}
+
+
 static void video_configure(const struct retro_game_geometry *geom) {
 	int nwidth, nheight;
 
@@ -188,8 +221,10 @@ static void video_configure(const struct retro_game_geometry *geom) {
 
 	g_video.tex_id = 0;
 
+	// Instead of just setting pixfmt, ensure we switch to the pixel format.
+	// Otherwise, g_video.bpp will be 0 and we'll divide by zero.
 	if (!g_video.pixfmt)
-		g_video.pixfmt = GL_UNSIGNED_SHORT_5_5_5_1;
+		video_set_pixel_format(0);
 
 	glfwSetWindowSize(g_win, nwidth, nheight);
 
@@ -219,34 +254,6 @@ static void video_configure(const struct retro_game_geometry *geom) {
 	g_video.clip_h = geom->base_height;
 
 	refresh_vertex_data();
-}
-
-
-static bool video_set_pixel_format(unsigned format) {
-	if (g_video.tex_id)
-		die("Tried to change pixel format after initialization.");
-
-	switch (format) {
-	case RETRO_PIXEL_FORMAT_0RGB1555:
-		g_video.pixfmt = GL_UNSIGNED_SHORT_5_5_5_1;
-		g_video.pixtype = GL_BGRA;
-		g_video.bpp = sizeof(uint16_t);
-		break;
-	case RETRO_PIXEL_FORMAT_XRGB8888:
-		g_video.pixfmt = GL_UNSIGNED_INT_8_8_8_8_REV;
-		g_video.pixtype = GL_BGRA;
-		g_video.bpp = sizeof(uint32_t);
-		break;
-	case RETRO_PIXEL_FORMAT_RGB565:
-		g_video.pixfmt  = GL_UNSIGNED_SHORT_5_6_5;
-		g_video.pixtype = GL_RGB;
-		g_video.bpp = sizeof(uint16_t);
-		break;
-	default:
-		die("Unknown pixel type %u", format);
-	}
-
-	return true;
 }
 
 
@@ -293,6 +300,7 @@ static void video_deinit() {
 }
 
 
+#if ALSA
 static void audio_init(int frequency) {
 	int err;
 
@@ -323,6 +331,11 @@ static size_t audio_write(const void *buf, unsigned frames) {
 
 	return written;
 }
+#else
+static void audio_init(int frequency) {}
+static void audio_deinit() {}
+static size_t audio_write(const void *buf, unsigned frames) { return frames; }
+#endif
 
 
 static void core_log(enum retro_log_level level, const char *fmt, ...) {
@@ -337,7 +350,7 @@ static void core_log(enum retro_log_level level, const char *fmt, ...) {
 	if (level == 0)
 		return;
 
-	fprintf(stderr, "[%s] %s", levelstr[level], buffer);
+	fprintf(stderr, "[%s] %s\n", levelstr[level], buffer);
 	fflush(stderr);
 
 	if (level == RETRO_LOG_ERROR)
