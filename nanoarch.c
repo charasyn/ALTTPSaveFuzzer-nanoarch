@@ -7,6 +7,8 @@
 #include <errno.h>
 #include <dlfcn.h>
 
+#include <unistd.h>
+
 #include "libretro.h"
 
 #include <GL/glew.h>
@@ -19,7 +21,9 @@ static GLFWwindow *g_win = NULL;
 #if ALSA
 static snd_pcm_t *g_pcm = NULL;
 #endif
-static float g_scale = 2;
+static float g_scale = 1;
+
+static int fc = 0;
 
 static GLfloat g_vertex[] = {
 	-1.0f, -1.0f, // left-bottom
@@ -78,7 +82,7 @@ struct keymap {
 };
 
 struct keymap g_binds[] = {
-	{ GLFW_KEY_X, RETRO_DEVICE_ID_JOYPAD_A },
+	// { GLFW_KEY_X, RETRO_DEVICE_ID_JOYPAD_A },
 	{ GLFW_KEY_Z, RETRO_DEVICE_ID_JOYPAD_B },
 	{ GLFW_KEY_A, RETRO_DEVICE_ID_JOYPAD_Y },
 	{ GLFW_KEY_S, RETRO_DEVICE_ID_JOYPAD_X },
@@ -153,7 +157,7 @@ static void create_window(int width, int height) {
 
 	glfwSwapInterval(0);
 
-	printf("GLSL Version: %s\n", glGetString(GL_SHADING_LANGUAGE_VERSION));
+	// printf("GLSL Version: %s\n", glGetString(GL_SHADING_LANGUAGE_VERSION));
 
 	glEnable(GL_TEXTURE_2D);
 
@@ -183,7 +187,7 @@ static bool video_set_pixel_format(unsigned format) {
 
 	switch (format) {
 	case RETRO_PIXEL_FORMAT_0RGB1555:
-		g_video.pixfmt = GL_UNSIGNED_SHORT_5_5_5_1;
+		g_video.pixfmt = GL_UNSIGNED_SHORT_1_5_5_5_REV;
 		g_video.pixtype = GL_BGRA;
 		g_video.bpp = sizeof(uint16_t);
 		break;
@@ -398,11 +402,12 @@ static void core_video_refresh(const void *data, unsigned width, unsigned height
 		video_refresh(data, width, height, pitch);
 }
 
-
 static void core_input_poll(void) {
 	int i;
 	for (i = 0; g_binds[i].k || g_binds[i].rk; ++i)
 		g_joy[g_binds[i].rk] = (glfwGetKey(g_win, g_binds[i].k) == GLFW_PRESS);
+	
+	g_joy[RETRO_DEVICE_ID_JOYPAD_A] = !g_joy[RETRO_DEVICE_ID_JOYPAD_A];
 
 	// Quit nanoarch when pressing the Escape key.
 	if (glfwGetKey(g_win, GLFW_KEY_ESCAPE) == GLFW_PRESS) {
@@ -474,7 +479,7 @@ static void core_load(const char *sofile) {
 	g_retro.retro_init();
 	g_retro.initialized = true;
 
-	puts("Core loaded");
+	// puts("Core loaded");
 }
 
 
@@ -516,8 +521,11 @@ libc_error:
 
 
 static void core_unload() {
-	if (g_retro.initialized)
+	if (g_retro.initialized) {
+		// Fix bug with save file not being saved.
+		g_retro.retro_unload_game();
 		g_retro.retro_deinit();
+	}
 
 	if (g_retro.handle)
 		dlclose(g_retro.handle);
@@ -544,7 +552,12 @@ int main(int argc, char *argv[]) {
 		video_render();
 
 		glfwSwapBuffers(g_win);
+		// usleep(1 * 1000);
+		// Stop the emulation after 2000 frames (enough time to load file 1)
+		fc += 1;
+		if (fc >= 2000) break;
 	}
+	// printf("fc=%d\n", fc);
 
 	core_unload();
 	audio_deinit();
